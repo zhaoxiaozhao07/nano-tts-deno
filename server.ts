@@ -19,15 +19,11 @@ console.log("-----------------------------------------");
 
 const STATIC_API_KEY = Deno.env.get("STATIC_API_KEY") ?? "sk-123456";
 
-Deno.serve({
-    port: 5050,
-    hostname: "0.0.0.0",
-    onListen({ port, hostname }: { port: number; hostname: string }) {
-        console.log(`🚀 TTS API 服务已就绪`);
-        console.log(`📡 本地访问: http://localhost:${port}`);
-        console.log(`🌐 监听地址: http://${hostname}:${port} (支持外部访问)`);
-    }
-}, async (req: Request) => {
+// 检测是否在 Deno Deploy 环境中运行
+const isDenoDeployEnv = Deno.env.get("DENO_DEPLOYMENT_ID") !== undefined;
+
+// 请求处理函数
+const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     console.log(`[${new Date().toLocaleTimeString()}] 收到请求: ${req.method} ${url.pathname}`);
 
@@ -139,4 +135,21 @@ Deno.serve({
     }
 
     return new Response("Not Found", { status: 404 });
-});
+};
+
+// 根据环境选择启动方式
+if (isDenoDeployEnv) {
+    // Deno Deploy 环境：不指定端口，由平台自动分配
+    Deno.serve(handler);
+} else {
+    // 本地开发环境：使用固定端口
+    Deno.serve({
+        port: 5050,
+        hostname: "0.0.0.0",
+        onListen({ port, hostname }: { port: number; hostname: string }) {
+            console.log(`🚀 TTS API 服务已就绪`);
+            console.log(`📡 本地访问: http://localhost:${port}`);
+            console.log(`🌐 监听地址: http://${hostname}:${port} (支持外部访问)`);
+        }
+    }, handler);
+}
