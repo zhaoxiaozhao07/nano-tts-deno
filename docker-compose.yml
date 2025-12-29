@@ -1,0 +1,16 @@
+services:
+  nano-tts:
+    build: .
+    container_name: nano-tts-api
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - STATIC_API_KEY=sk-57Gz5L+u5L+u
+    # 可选：健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
