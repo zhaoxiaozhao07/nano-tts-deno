@@ -64,25 +64,32 @@ Deno.serve({
     if (url.pathname === "/v1/audio/speech" && req.method === "POST") {
         try {
             const body = await req.json();
-            const { model, input, stream } = body;
+            const { voice, input, stream } = body;
 
-            if (!model || !input) {
-                return new Response(JSON.stringify({ error: "Missing model or input" }), {
+            if (!input) {
+                return new Response(JSON.stringify({ error: "Missing input" }), {
                     status: 400,
                     headers: { "Content-Type": "application/json" },
                 });
             }
 
+            // 校验 voice 是否支持，不支持则默认使用 DeepSeek
+            const supportedVoices = Object.keys(tts.voices);
+            const selectedVoice = (voice && supportedVoices.includes(voice)) ? voice : "DeepSeek";
+            if (voice && voice !== selectedVoice) {
+                console.log(`[TTS] 不支持的语音模型: ${voice}，已回退到默认值: DeepSeek`);
+            }
+
             // 拆分文本
             const textChunks = tts.splitText(input, 200);
-            console.log(`[TTS] 请求: model=${model}, 文本长度=${input.length}, 拆分为 ${textChunks.length} 段, stream=${!!stream}`);
+            console.log(`[TTS] 请求: voice=${selectedVoice}, 文本长度=${input.length}, 拆分为 ${textChunks.length} 段, stream=${!!stream}`);
 
             if (stream) {
                 // 流式响应：边收边发
                 const readableStream = new ReadableStream({
                     async start(controller) {
                         try {
-                            for await (const chunk of tts.getAudioChunks(textChunks, model)) {
+                            for await (const chunk of tts.getAudioChunks(textChunks, selectedVoice)) {
                                 controller.enqueue(chunk);
                             }
                             controller.close();
@@ -101,7 +108,7 @@ Deno.serve({
             } else {
                 // 非流式响应：收集完毕后一并返回
                 const chunks: Uint8Array[] = [];
-                for await (const chunk of tts.getAudioChunks(textChunks, model)) {
+                for await (const chunk of tts.getAudioChunks(textChunks, selectedVoice)) {
                     chunks.push(chunk);
                 }
 
