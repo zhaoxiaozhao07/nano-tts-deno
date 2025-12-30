@@ -12,6 +12,11 @@ export interface VoiceInfo {
 }
 
 export class NanoAITTS {
+  // 哈希算法用常量
+  private static readonly HASH_MASK_1 = 268435455;   // 0x0FFFFFFF
+  private static readonly HASH_MASK_2 = 266338304;   // 0x0FE00000
+  private static readonly INT32_MAX = 2147483647;    // 0x7FFFFFFF (32位有符号整数最大值)
+
   private ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36";
   private readonly FETCH_TIMEOUT_MS = 30000; // 30秒超时
   public voices: Record<string, VoiceInfo> = {};
@@ -31,15 +36,12 @@ export class NanoAITTS {
    * 核心位运算逻辑，保留与 Python 版本一致的溢出处理
    */
   private _e(nt: string): number {
-    const HASH_MASK_1 = 268435455;
-    const HASH_MASK_2 = 266338304;
-
     let at = 0;
     for (let i = nt.length - 1; i >= 0; i--) {
       const st = nt.charCodeAt(i);
       // JS 位运算在 32 位上有符号进行。为了模拟 Python 的行为，我们需要使用无符号位移和位掩码。
-      at = (((at << 6) & HASH_MASK_1) + st + (st << 14)) | 0; // 使用 | 0 确保保持在 32 位有符号整数
-      const it = at & HASH_MASK_2;
+      at = (((at << 6) & NanoAITTS.HASH_MASK_1) + st + (st << 14)) | 0;
+      const it = at & NanoAITTS.HASH_MASK_2;
       if (it !== 0) {
         at = at ^ (it >>> 21); // 使用无符号右移
       }
@@ -67,11 +69,10 @@ export class NanoAITTS {
       at += 1;
     }
 
-    // 模拟 Python 的 (random.random() * 2147483647) ^ self._e(nt)) * 2147483647
-    // 由于涉及大数，可能由于精度丢失产生偏差，但核心算法应保持一致
-    const randomVal = Math.round(Math.random() * 2147483647);
+    // 模拟 Python 的大数运算
+    const randomVal = Math.round(Math.random() * NanoAITTS.INT32_MAX);
     const hash = (randomVal ^ this._e(nt)) >>> 0;
-    return hash * 2147483647;
+    return hash * NanoAITTS.INT32_MAX;
   }
 
   private generateMid(): string {
@@ -219,7 +220,7 @@ export class NanoAITTS {
    * 获取多段音频的 AsyncGenerator
    * 逐段请求上游，失败则跳过继续
    */
-  public async *getAudioChunks(texts: string[], voice = "DeepSeek"): AsyncGenerator<Uint8Array> {
+  public async * getAudioChunks(texts: string[], voice = "DeepSeek"): AsyncGenerator<Uint8Array> {
     for (let i = 0; i < texts.length; i++) {
       const text = texts[i];
       console.log(`[TTS] 处理第 ${i + 1}/${texts.length} 段: "${text.slice(0, 30)}..."`);

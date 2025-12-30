@@ -9,7 +9,7 @@ services:
       - STATIC_API_KEY=sk-57Gz5L+u5L+u
     # 可选：健康检查
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/ping"]
+      test: ["CMD", "deno", "eval", "await fetch('http://localhost:5050/ping')"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,6 +1,5 @@
 # Deno
 .deno/
-deno.lock
 
 # Dependencies (if using node_modules for compatibility)
 node_modules/
