@@ -13,6 +13,7 @@ export interface VoiceInfo {
 
 export class NanoAITTS {
   private ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36";
+  private readonly FETCH_TIMEOUT_MS = 30000; // 30秒超时
   public voices: Record<string, VoiceInfo> = {};
 
   constructor() { }
@@ -119,6 +120,7 @@ export class NanoAITTS {
       console.log("正在从 API 加载模型列表...");
       const response = await fetch("https://bot.n.cn/api/robot/platform", {
         headers: await this.getHeaders(),
+        signal: AbortSignal.timeout(this.FETCH_TIMEOUT_MS),
       });
       const data = await response.json();
 
@@ -139,7 +141,7 @@ export class NanoAITTS {
   /**
    * 获取音频 (支持流式)
    */
-  public async getAudio(text: string, voice = "DeepSeek", _stream = false): Promise<Response> {
+  public async getAudio(text: string, voice = "DeepSeek"): Promise<Response> {
     const url = `https://bot.n.cn/api/tts/v1?roleid=${voice}`;
     const headers = await this.getHeaders();
     headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -150,6 +152,7 @@ export class NanoAITTS {
       method: "POST",
       headers,
       body,
+      signal: AbortSignal.timeout(this.FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {
