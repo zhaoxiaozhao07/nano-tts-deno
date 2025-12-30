@@ -123,18 +123,41 @@ export class NanoAITTS {
         headers: await this.getHeaders(),
         signal: AbortSignal.timeout(this.FETCH_TIMEOUT_MS),
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP 错误: ${response.status}`);
+      }
+
       const data = await response.json();
+
+      // 校验 API 响应结构
+      if (!data || typeof data !== "object") {
+        throw new Error("API 响应格式无效: 非对象类型");
+      }
+      if (!data.data || !Array.isArray(data.data.list)) {
+        throw new Error("API 响应格式无效: 缺少 data.list 数组");
+      }
 
       this.voices = {};
       for (const item of data.data.list) {
-        this.voices[item.tag] = {
-          name: item.title,
-          iconUrl: item.icon,
-        };
+        // 校验每个 item 的必要字段
+        if (item && typeof item.tag === "string") {
+          this.voices[item.tag] = {
+            name: item.title || item.tag,
+            iconUrl: item.icon || "",
+          };
+        }
       }
+
+      if (Object.keys(this.voices).length === 0) {
+        throw new Error("API 未返回有效的声音模型");
+      }
+
       console.log(`已加载 ${Object.keys(this.voices).length} 个声音模型`);
     } catch (e) {
-      console.error(`加载声音列表失败: ${e}`);
+      const err = e as Error;
+      console.error(`加载声音列表失败: ${err.message}`);
+      // 回退到默认值
       this.voices["DeepSeek"] = { name: "DeepSeek (默认)", iconUrl: "" };
     }
   }
@@ -218,9 +241,92 @@ export class NanoAITTS {
 
   /**
    * 获取多段音频的 AsyncGenerator
-   * 逐段请求上游，失败则跳过继续
+   * 支持有限并发请求，失败则跳过继续
+   * @param texts 文本段落数组
+   * @param voice 语音模型
+   * @param concurrency 最大并发数（默认为 3）
    */
-  public async * getAudioChunks(texts: string[], voice = "DeepSeek"): AsyncGenerator<Uint8Array> {
+  public async * getAudioChunks(
+    texts: string[],
+    voice = "DeepSeek",
+    concurrency = 3
+  ): AsyncGenerator<Uint8Array> {
+    // 如果并发数为 1 或文本段落少，使用串行模式
+    if (concurrency <= 1 || texts.length <= 2) {
+      yield* this.getAudioChunksSerial(texts, voice);
+      return;
+    }
+
+    // 并发模式：按批次并行获取，保持顺序输出
+    const results: (Uint8Array | null)[] = new Array(texts.length).fill(null);
+
+    // 单个文本段的获取任务
+    const fetchOne = async (index: number): Promise<void> => {
+      const text = texts[index];
+      console.log(`[TTS] 处理第 ${index + 1}/${texts.length} 段: "${text.slice(0, 30)}..."`);
+
+      try {
+        const response = await this.getAudio(text, voice);
+        const reader = response.body?.getReader();
+
+        if (!reader) {
+          console.warn(`[TTS] 第 ${index + 1} 段无响应体，跳过`);
+          return;
+        }
+
+        // 读取整个响应到内存
+        const chunks: Uint8Array[] = [];
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        // 合并 chunks
+        const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+        const merged = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        results[index] = merged;
+      } catch (e: unknown) {
+        const err = e as Error;
+        console.error(`[TTS] 第 ${index + 1} 段请求失败，跳过: ${err.message}`);
+      }
+    };
+
+    // 分批处理
+    for (let batchStart = 0; batchStart < texts.length; batchStart += concurrency) {
+      const batchEnd = Math.min(batchStart + concurrency, texts.length);
+      const batchPromises: Promise<void>[] = [];
+
+      for (let i = batchStart; i < batchEnd; i++) {
+        batchPromises.push(fetchOne(i));
+      }
+
+      // 等待当前批次完成
+      await Promise.all(batchPromises);
+
+      // 按顺序 yield 当前批次的结果
+      for (let i = batchStart; i < batchEnd; i++) {
+        if (results[i]) {
+          yield results[i]!;
+        }
+      }
+    }
+  }
+
+  /**
+   * 串行获取音频（保持原始逻辑，用于低并发场景）
+   */
+  private async * getAudioChunksSerial(texts: string[], voice: string): AsyncGenerator<Uint8Array> {
     for (let i = 0; i < texts.length; i++) {
       const text = texts[i];
       console.log(`[TTS] 处理第 ${i + 1}/${texts.length} 段: "${text.slice(0, 30)}..."`);
@@ -234,15 +340,18 @@ export class NanoAITTS {
           continue;
         }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) yield value;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) yield value;
+          }
+        } finally {
+          reader.releaseLock();
         }
       } catch (e: unknown) {
         const err = e as Error;
         console.error(`[TTS] 第 ${i + 1} 段请求失败，跳过: ${err.message}`);
-        // 失败跳过，继续处理下一段
       }
     }
   }
